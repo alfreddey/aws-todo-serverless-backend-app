@@ -1,0 +1,421 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Serverless to-do app (Java) with Cognito auth, DynamoDB task storage, and event-driven expiry/cancellation via EventBridge Scheduler, DynamoDB Streams, and SQS FIFO.
+
+Metadata:
+  cfn-lint:
+    config:
+      # AmplifyApp.AccessToken has a non-empty pattern, but the resource is
+      # gated by HasGitHubRepository, so the "" default is never actually used.
+      ignore_checks:
+        - W1030
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: serverless-todo-java
+
+  GitHubRepositoryUrl:
+    Type: String
+    Description: HTTPS URL of the GitHub repo containing the frontend/ directory
+    Default: ''
+
+  GitHubAccessToken:
+    Type: String
+    Description: GitHub personal access token with repo access, used by Amplify Hosting
+    Default: ''
+    NoEcho: true
+
+  GitHubBranchName:
+    Type: String
+    Default: main
+
+Conditions:
+  HasGitHubRepository: !Not
+    - !Equals
+      - !Ref GitHubRepositoryUrl
+      - ''
+
+Globals:
+  Function:
+    Runtime: java21
+    # Java needs more headroom than Node for cold starts and SDK init.
+    Timeout: 15
+    MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TasksTable
+
+Resources:
+  # ---------------------------------------------------------------------
+  # Cognito
+  # ---------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
+        PostAuthentication: !GetAtt PostAuthenticationFunction.Arn
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${ProjectName}-web-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  PreSignUpInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PreSignUpFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  PostAuthenticationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PostAuthenticationFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  # ---------------------------------------------------------------------
+  # DynamoDB
+  # ---------------------------------------------------------------------
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ProjectName}-tasks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+        - AttributeName: TaskId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+        - AttributeName: TaskId
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # ---------------------------------------------------------------------
+  # SNS
+  # ---------------------------------------------------------------------
+  NotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ProjectName}-notifications
+
+  # ---------------------------------------------------------------------
+  # SQS FIFO (cancellation workflow)
+  # ---------------------------------------------------------------------
+  CancellationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-cancellations.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 30
+
+  # ---------------------------------------------------------------------
+  # EventBridge Scheduler execution role (assumed by the scheduler service
+  # to invoke ExpireTaskFunction at each task's deadline)
+  # ---------------------------------------------------------------------
+  SchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeExpireTaskFunction
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ExpireTaskFunction.Arn
+
+  # ---------------------------------------------------------------------
+  # Lambda: Cognito triggers
+  # ---------------------------------------------------------------------
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.PreSignUpHandler::handleRequest
+
+  PostAuthenticationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.PostAuthenticationHandler::handleRequest
+      Environment:
+        Variables:
+          NOTIFICATIONS_TOPIC_ARN: !Ref NotificationsTopic
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: sns:Subscribe
+              Resource: !Ref NotificationsTopic
+
+  # ---------------------------------------------------------------------
+  # Lambda: Task CRUD
+  # ---------------------------------------------------------------------
+  CreateTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.CreateTaskHandler::handleRequest
+      Environment:
+        Variables:
+          EXPIRE_FUNCTION_ARN: !GetAtt ExpireTaskFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerExecutionRole.Arn
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref TasksTable
+        - Statement:
+            - Effect: Allow
+              Action: scheduler:CreateSchedule
+              Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/*
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt SchedulerExecutionRole.Arn
+      Events:
+        CreateTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /tasks
+            Method: POST
+
+  ListTasksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.ListTasksHandler::handleRequest
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TasksTable
+      Events:
+        ListTasks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /tasks
+            Method: GET
+
+  UpdateTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.UpdateTaskHandler::handleRequest
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt TasksTable.Arn
+      Events:
+        UpdateTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /tasks/{taskId}
+            Method: PUT
+
+  DeleteTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.DeleteTaskHandler::handleRequest
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:DeleteItem
+              Resource: !GetAtt TasksTable.Arn
+      Events:
+        DeleteTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TodoApi
+            Path: /tasks/{taskId}
+            Method: DELETE
+
+  # ---------------------------------------------------------------------
+  # Lambda: Expiry workflow (invoked by EventBridge Scheduler)
+  # ---------------------------------------------------------------------
+  ExpireTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.ExpireTaskHandler::handleRequest
+      Environment:
+        Variables:
+          NOTIFICATIONS_TOPIC_ARN: !Ref NotificationsTopic
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt TasksTable.Arn
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref NotificationsTopic
+
+  # ---------------------------------------------------------------------
+  # Lambda: Cancellation workflow (DynamoDB Streams -> SQS FIFO -> Lambda)
+  # ---------------------------------------------------------------------
+  StreamProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.StreamProcessorHandler::handleRequest
+      Environment:
+        Variables:
+          CANCELLATION_QUEUE_URL: !Ref CancellationQueue
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt CancellationQueue.QueueName
+      Events:
+        TableStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt TasksTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumRetryAttempts: 3
+
+  CancelScheduleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: target/todo-backend.jar
+      Handler: com.todo.CancelScheduleHandler::handleRequest
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt CancellationQueue.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: scheduler:DeleteSchedule
+              Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/*
+      Events:
+        CancellationQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CancellationQueue.Arn
+            BatchSize: 10
+
+  # ---------------------------------------------------------------------
+  # API Gateway
+  # ---------------------------------------------------------------------
+  TodoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
+        AllowHeaders: '''Content-Type,Authorization'''
+        AllowOrigin: '''*'''
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # ---------------------------------------------------------------------
+  # Amplify Hosting (frontend)
+  # ---------------------------------------------------------------------
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Condition: HasGitHubRepository
+    Properties:
+      Name: !Sub ${ProjectName}-frontend
+      Repository: !Ref GitHubRepositoryUrl
+      AccessToken: !Ref GitHubAccessToken
+      Platform: WEB
+      BuildSpec: |
+        version: 1
+        applications:
+          - appRoot: frontend
+            frontend:
+              phases:
+                preBuild:
+                  commands:
+                    - npm ci
+                build:
+                  commands:
+                    - npm run build
+              artifacts:
+                baseDirectory: dist
+                files:
+                  - "**/*"
+              cache:
+                paths:
+                  - node_modules/**/*
+      EnvironmentVariables:
+        - Name: VITE_AWS_REGION
+          Value: !Ref AWS::Region
+        - Name: VITE_USER_POOL_ID
+          Value: !Ref UserPool
+        - Name: VITE_USER_POOL_CLIENT_ID
+          Value: !Ref UserPoolClient
+        - Name: VITE_API_URL
+          Value: !Sub https://${TodoApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Condition: HasGitHubRepository
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref GitHubBranchName
+      EnableAutoBuild: true
+      Stage: PRODUCTION
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the REST API
+    Value: !Sub https://${TodoApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  UserPoolId:
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+
+  TasksTableName:
+    Value: !Ref TasksTable
+
+  NotificationsTopicArn:
+    Value: !Ref NotificationsTopic
+
+  AmplifyDefaultDomain:
+    Condition: HasGitHubRepository
+    Value: !Sub https://${GitHubBranchName}.${AmplifyApp.DefaultDomain}

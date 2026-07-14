@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "serverless-todo-java"
+resolve_s3 = true
+s3_prefix = "serverless-todo-java"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "ProjectName=\"serverless-todo-java\" GitHubRepositoryUrl=\"\" GitHubBranchName=\"main\""
+image_repositories = []
+
+[default.global.parameters]
+region = "eu-north-1"

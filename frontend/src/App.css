@@ -1,0 +1,96 @@
+.app {
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  font-family: system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.task-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.task-form input[type="text"] {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #222;
+  color: white;
+}
+
+.task-list ul {
+  list-style: none;
+  padding: 0;
+}
+
+.task-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.task-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.status {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  width: fit-content;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.status-pending {
+  background: #fff3cd;
+}
+
+.status-completed {
+  background: #d4edda;
+}
+
+.status-expired {
+  background: #f8d7da;
+}
+
+.task-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.error {
+  color: #b00020;
+}
+
+.empty-state {
+  color: #777;
+}
