@@ -4,12 +4,6 @@ backend/target/
 # SAM
 backend/.aws-sam/
 
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.local
-
 # General
 .DS_Store
 *.log

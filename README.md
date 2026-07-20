@@ -8,8 +8,9 @@ architecture is unchanged. See [PRD.md](PRD.md) for the full spec.
 ## Structure
 
 - `backend/` - AWS SAM template + Java Lambda functions (one Maven project)
-- `frontend/` - React + Vite + aws-amplify SPA, hosted on AWS Amplify
 - `diagrams/` - architecture diagram (`.drawio` source + `.png`)
+
+The frontend lives in a separate repo: `aws-serverless-todo-app-frontend-java`.
 
 ## How the Java backend is packaged
 
@@ -42,21 +43,12 @@ sam deploy \
     GitHubBranchName=main
 ```
 
-This adds an `AWS::Amplify::App` wired to the repo's `frontend/` directory, with
-`VITE_*` environment variables pre-populated from the Cognito/API outputs, and
-triggers a build on every push to the branch.
+This adds an `AWS::Amplify::App` wired to the frontend repo (built from its root),
+with `VITE_*` environment variables pre-populated from the Cognito/API outputs,
+and triggers a build on every push to the branch.
 
-Grab `UserPoolId`, `UserPoolClientId`, and `ApiUrl` from the stack outputs if you
-want to run the frontend locally instead (copy `frontend/.env.example` to
-`frontend/.env.local` and fill them in).
-
-## Run the frontend locally
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Grab `UserPoolId`, `UserPoolClientId`, and `ApiUrl` from the stack outputs to
+configure the frontend (see the frontend repo's README).
 
 ## Notes on the expiry/cancellation design
 
@@ -78,4 +70,3 @@ npm run dev
 
 - Java 21+ and Maven
 - AWS SAM CLI and configured AWS credentials
-- Node.js (for the frontend)

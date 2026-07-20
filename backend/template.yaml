@@ -18,7 +18,7 @@ Parameters:
 
   GitHubRepositoryUrl:
     Type: String
-    Description: HTTPS URL of the GitHub repo containing the frontend/ directory
+    Description: HTTPS URL of the separate frontend repo
     Default: ''
 
   GitHubAccessToken:
@@ -363,23 +363,21 @@ Resources:
       Platform: WEB
       BuildSpec: |
         version: 1
-        applications:
-          - appRoot: frontend
-            frontend:
-              phases:
-                preBuild:
-                  commands:
-                    - npm ci
-                build:
-                  commands:
-                    - npm run build
-              artifacts:
-                baseDirectory: dist
-                files:
-                  - "**/*"
-              cache:
-                paths:
-                  - node_modules/**/*
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - npm ci
+            build:
+              commands:
+                - npm run build
+          artifacts:
+            baseDirectory: dist
+            files:
+              - "**/*"
+          cache:
+            paths:
+              - node_modules/**/*
       EnvironmentVariables:
         - Name: VITE_AWS_REGION
           Value: !Ref AWS::Region
