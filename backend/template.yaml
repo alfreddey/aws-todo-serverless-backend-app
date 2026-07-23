@@ -171,13 +171,13 @@ Resources:
   PreSignUpFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.PreSignUpHandler::handleRequest
 
   PostAuthenticationFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.PostAuthenticationHandler::handleRequest
       Environment:
         Variables:
@@ -194,7 +194,7 @@ Resources:
   CreateTaskFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.CreateTaskHandler::handleRequest
       Environment:
         Variables:
@@ -221,7 +221,7 @@ Resources:
   ListTasksFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.ListTasksHandler::handleRequest
       Policies:
         - DynamoDBReadPolicy:
@@ -237,7 +237,7 @@ Resources:
   UpdateTaskFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.UpdateTaskHandler::handleRequest
       Policies:
         - Statement:
@@ -255,7 +255,7 @@ Resources:
   DeleteTaskFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.DeleteTaskHandler::handleRequest
       Policies:
         - Statement:
@@ -276,7 +276,7 @@ Resources:
   ExpireTaskFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.ExpireTaskHandler::handleRequest
       Environment:
         Variables:
@@ -296,7 +296,7 @@ Resources:
   StreamProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.StreamProcessorHandler::handleRequest
       Environment:
         Variables:
@@ -316,7 +316,7 @@ Resources:
   CancelScheduleFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: target/todo-backend.jar
+      CodeUri: .
       Handler: com.todo.CancelScheduleHandler::handleRequest
       Policies:
         - SQSPollerPolicy:

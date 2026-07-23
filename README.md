@@ -14,23 +14,22 @@ The frontend lives in a separate repo: `aws-serverless-todo-app-frontend-java`.
 
 ## How the Java backend is packaged
 
-- One Maven project builds a single fat jar: `backend/target/todo-backend.jar`.
-- Every Lambda in `template.yaml` uses that same jar as its `CodeUri` and points
-  its `Handler` at a different class (e.g. `com.todo.CreateTaskHandler`).
-- Shared helpers (`com.todo.util.*`) compile into the jar, so there is no Lambda
-  layer — Java doesn't need the layer pattern the Node version used.
+- One Maven project holds every Lambda. `sam build` compiles it once and copies
+  the classes plus `lib/` dependencies into each function's package.
+- Every Lambda in `template.yaml` shares `CodeUri: .` (the project directory) and
+  points its `Handler` at a different class (e.g. `com.todo.CreateTaskHandler`).
+- Shared helpers (`com.todo.util.*`) compile in alongside the handlers, so there
+  is no Lambda layer — Java doesn't need the layer pattern the Node version used.
 
 ## Deploy the backend
 
 ```bash
 cd backend
-./build.sh          # mvn clean package -> target/todo-backend.jar
-sam deploy --guided # packages the jar and creates the stack
+sam build           # compiles + packages each function into .aws-sam/build
+sam deploy --guided # uploads the built artifacts and creates the stack
 ```
 
-`sam build` is not used here (the deploy artifact is the pre-built jar, not a
-source directory). Run `./build.sh` again whenever you change the Java code, then
-`sam deploy`.
+Run `sam build` again whenever you change the Java code, then `sam deploy`.
 
 On first deploy, leave `GitHubRepositoryUrl` blank to stand up everything except
 Amplify Hosting. Once the frontend repo is pushed to GitHub, redeploy with:

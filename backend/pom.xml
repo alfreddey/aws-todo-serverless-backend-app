@@ -22,7 +22,6 @@
 
     <!-- Plugin versions -->
     <compiler.plugin.version>3.13.0</compiler.plugin.version>
-    <shade.plugin.version>3.6.0</shade.plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -80,30 +79,13 @@
   </dependencies>
 
   <build>
-    <finalName>todo-backend</finalName>
     <plugins>
+      <!-- sam build compiles here, then copies classes + lib/ deps into each
+           function's Lambda package (no fat jar needed). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>${compiler.plugin.version}</version>
-      </plugin>
-
-      <!-- Bundle all classes + dependencies into one deployable jar -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>${shade.plugin.version}</version>
-        <configuration>
-          <createDependencyReducedPom>false</createDependencyReducedPom>
-        </configuration>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>shade</goal>
-            </goals>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
   </build>
